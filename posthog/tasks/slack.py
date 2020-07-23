@@ -3,7 +3,7 @@ import re
 import requests
 from celery import shared_task
 from django.conf import settings
-from typing import Tuple
+from typing import Tuple, List
 
 from posthog.models import Action, Event, Team
 
@@ -35,12 +35,14 @@ def get_action_details(action: Action, event: Event, site_url: str) -> Tuple[str
     return action.name, action_markdown
 
 
-def get_tokens(message_format: str) -> Tuple[str, str]:
+def get_tokens(message_format: str) -> Tuple[list, str]:
     matched_tokens = re.findall(r"(?<=\[)(.*?)(?=\])", message_format)
     if matched_tokens:
         tokenised_message = re.sub(r"\[(.*?)\]", "{}", message_format)
         return matched_tokens, tokenised_message
-    raise ValueError
+    else:
+        raise ValueError
+    return None
 
 
 def get_value_of_token(
