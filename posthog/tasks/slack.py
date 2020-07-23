@@ -4,7 +4,7 @@ import requests
 from celery import shared_task
 from django.conf import settings
 
-from posthog.models import Action, Event
+from posthog.models import Action, Event, Team
 
 
 def get_user_details(event: Event, site_url: str) -> (str, str):
@@ -96,7 +96,7 @@ def get_formatted_message(action: Action, event: Event, site_url: str) -> (str, 
     return message_text, message_markdown
 
 
-def get_webhook_type(team: Event) -> str:
+def get_webhook_type(team: Team) -> str:
     if "slack.com" in team.slack_incoming_webhook:
         return "slack"
     return "teams"
