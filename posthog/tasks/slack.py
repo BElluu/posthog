@@ -40,8 +40,6 @@ def get_tokens(message_format: str) -> Tuple[list, str]:
     if matched_tokens:
         tokenised_message = re.sub(r"\[(.*?)\]", "{}", message_format)
         return matched_tokens, tokenised_message
-    else:
-        raise ValueError
     return None
 
 
@@ -73,11 +71,14 @@ def get_formatted_message(action: Action, event: Event, site_url: str) -> Tuple[
     if message_format is None:
         message_format = "[action.name] was triggered by [user.name]"
 
-    tokens, tokenised_message = get_tokens(message_format)
-    values = []
-    markdown_values = []
-
     try:
+        if get_tokens(message_format) is None:
+            raise ValueError
+        else:
+            tokens, tokenised_message = get_tokens(message_format)
+        values = []
+        markdown_values = []
+
         for token in tokens:
             token_parts = re.findall(r"\w+", token)
 
