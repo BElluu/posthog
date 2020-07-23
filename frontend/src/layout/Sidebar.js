@@ -20,6 +20,7 @@ import {
     ExperimentOutlined,
     ClockCircleOutlined,
     RetweetOutlined,
+    MessageOutlined,
 } from '@ant-design/icons'
 import { useActions, useValues } from 'kea'
 import { Link } from 'lib/components/Link'
@@ -28,6 +29,8 @@ import { dashboardsModel } from '~/models/dashboardsModel'
 import whiteLogo from './../../public/posthog-logo-white.svg'
 import { triggerResizeAfterADelay } from 'lib/utils'
 import { useEscapeKey } from 'lib/hooks/useEscapeKey'
+import { HogIcon } from 'lib/icons/HogIcon'
+import { ToolbarModal } from '~/layout/ToolbarModal/ToolbarModal'
 
 const itemStyle = { display: 'flex', alignItems: 'center' }
 
@@ -58,10 +61,13 @@ const submenuOverride = {
     sessions: 'events',
     cohorts: 'people',
     retention: 'people',
+    setup: 'settings',
+    annotations: 'settings',
 }
 
 export function Sidebar({ user, sidebarCollapsed, setSidebarCollapsed }) {
     const [inviteModalOpen, setInviteModalOpen] = useState(false)
+    const [toolbarModalOpen, setToolbarModalOpen] = useState(false)
     const collapseSidebar = () => {
         if (!sidebarCollapsed && window.innerWidth <= 991) {
             setSidebarCollapsed(true)
@@ -109,6 +115,16 @@ export function Sidebar({ user, sidebarCollapsed, setSidebarCollapsed }) {
                     mode="inline"
                 >
                     <Logo />
+
+                    <Menu.Item
+                        key="toolbar"
+                        style={{ ...itemStyle, background: 'hsla(210, 10%, 12%, 1)' }}
+                        onClick={() => setToolbarModalOpen(true)}
+                        data-attr="menu-item-toolbar"
+                    >
+                        <HogIcon style={{ width: '1.4em', marginLeft: '-0.2em', marginRight: 'calc(10px - 0.2em)' }} />
+                        <span className="sidebar-label">Launch Toolbar!</span>
+                    </Menu.Item>
 
                     {pinnedDashboards.map((dashboard, index) => (
                         <Menu.Item
@@ -215,11 +231,31 @@ export function Sidebar({ user, sidebarCollapsed, setSidebarCollapsed }) {
                         <span className="sidebar-label">{'Experiments'}</span>
                         <Link to={'/experiments/feature_flags'} onClick={collapseSidebar} />
                     </Menu.Item>
-                    <Menu.Item key="setup" style={itemStyle} data-attr="menu-item-setup">
-                        <SettingOutlined />
-                        <span className="sidebar-label">{'Setup'}</span>
-                        <Link to={'/setup'} onClick={collapseSidebar} />
-                    </Menu.Item>
+
+                    <Menu.SubMenu
+                        key="settings"
+                        title={
+                            <span style={itemStyle} data-attr="menu-item-settings">
+                                <SettingOutlined />
+                                <span className="sidebar-label">{'Settings'}</span>
+                            </span>
+                        }
+                        onTitleClick={() => {
+                            collapseSidebar()
+                            location.pathname !== '/setup' && push('/setup')
+                        }}
+                    >
+                        <Menu.Item key="setup" style={itemStyle} data-attr="menu-item-setup">
+                            <SettingOutlined />
+                            <span className="sidebar-label">{'Setup'}</span>
+                            <Link to={'/setup'} onClick={collapseSidebar} />
+                        </Menu.Item>
+                        <Menu.Item key="annotations" style={itemStyle} data-attr="menu-item-annotations">
+                            <MessageOutlined />
+                            <span className="sidebar-label">{'Annotations'}</span>
+                            <Link to={'/annotations'} onClick={collapseSidebar} />
+                        </Menu.Item>
+                    </Menu.SubMenu>
                     <Menu.Item
                         key="invite"
                         style={itemStyle}
@@ -230,6 +266,15 @@ export function Sidebar({ user, sidebarCollapsed, setSidebarCollapsed }) {
                         <span className="sidebar-label">{'Invite your team'}</span>
                     </Menu.Item>
                 </Menu>
+
+                <Modal
+                    bodyStyle={{ padding: 0 }}
+                    visible={toolbarModalOpen}
+                    footer={null}
+                    onCancel={() => setToolbarModalOpen(false)}
+                >
+                    <ToolbarModal />
+                </Modal>
 
                 <Modal visible={inviteModalOpen} footer={null} onCancel={() => setInviteModalOpen(false)}>
                     <InviteTeam user={user} />

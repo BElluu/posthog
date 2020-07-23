@@ -30,6 +30,10 @@ from rest_framework.decorators import action
 from django.db.models import (
     Q,
     Count,
+    Sum,
+    Avg,
+    Min,
+    Max,
     Prefetch,
     functions,
     QuerySet,
@@ -37,7 +41,10 @@ from django.db.models import (
     Exists,
     Value,
     BooleanField,
+    FloatField,
 )
+from django.db.models.expressions import RawSQL
+from django.db.models.functions import Cast
 from django.db import connection
 from django.utils.timezone import now
 from typing import Any, List, Dict, Optional, Tuple, Union
@@ -191,7 +198,7 @@ class ActionViewSet(viewsets.ModelViewSet):
         actions = self.get_queryset()
         params = request.GET.dict()
         filter = Filter(request=request)
-        result = calculate_trends(filter, params, team.pk, actions)
+        result = calculate_trends(filter, team.pk, actions)
 
         dashboard_id = request.GET.get("from_dashboard", None)
         if dashboard_id:
@@ -203,9 +210,15 @@ class ActionViewSet(viewsets.ModelViewSet):
     def retention(self, request: request.Request, *args: Any, **kwargs: Any) -> Response:
         team = request.user.team_set.get()
         properties = request.GET.get("properties", "{}")
+        start_entity_data = request.GET.get("start_entity", None)
+        start_entity: Optional[Entity] = None
+        if start_entity_data:
+            data = json.loads(start_entity_data)
+            start_entity = Entity({"id": data["id"], "type": data["type"]})
+
         filter = Filter(data={"properties": json.loads(properties)})
         filter._date_from = "-11d"
-        result = calculate_retention(filter, team)
+        result = calculate_retention(filter, team, start_entity=start_entity)
         return Response(result)
 
     @action(methods=["GET"], detail=False)
@@ -296,8 +309,7 @@ class ActionViewSet(viewsets.ModelViewSet):
         return Response({"results": [people], "next": next_url, "previous": current_url[1:]})
 
 
-def calculate_trends(filter: Filter, params: dict, team_id: int, actions: QuerySet) -> List[Dict[str, Any]]:
-    compare = params.get("compare")
+def calculate_trends(filter: Filter, team_id: int, actions: QuerySet) -> List[Dict[str, Any]]:
     entities_list = []
     actions = actions.filter(deleted=False)
 
@@ -318,7 +330,7 @@ def calculate_trends(filter: Filter, params: dict, team_id: int, actions: QueryS
         filter._date_to = now().isoformat()
 
     compared_filter = None
-    if compare:
+    if filter.compare:
         compared_filter = determine_compared_filter(filter)
 
     for entity in filter.entities:
@@ -328,14 +340,12 @@ def calculate_trends(filter: Filter, params: dict, team_id: int, actions: QueryS
                 entity.name = db_action.name
             except IndexError:
                 continue
-        trend_entity = serialize_entity(entity=entity, filter=filter, params=params, team_id=team_id)
-        if compare and compared_filter:
+        trend_entity = serialize_entity(entity=entity, filter=filter, team_id=team_id)
+        if filter.compare and compared_filter:
             trend_entity = convert_to_comparison(trend_entity, filter, "{} - {}".format(entity.name, "current"))
             entities_list.extend(trend_entity)
 
-            compared_trend_entity = serialize_entity(
-                entity=entity, filter=compared_filter, params=params, team_id=team_id
-            )
+            compared_trend_entity = serialize_entity(entity=entity, filter=compared_filter, team_id=team_id)
 
             compared_trend_entity = convert_to_comparison(
                 compared_trend_entity, compared_filter, "{} - {}".format(entity.name, "previous"),
@@ -346,18 +356,18 @@ def calculate_trends(filter: Filter, params: dict, team_id: int, actions: QueryS
     return entities_list
 
 
-def calculate_retention(filter: Filter, team: Team, total_days=11):
+def calculate_retention(filter: Filter, team: Team, start_entity: Optional[Entity] = None, total_days=11):
     date_from: datetime.datetime = filter.date_from  # type: ignore
     filter._date_to = (date_from + timedelta(days=total_days)).isoformat()
     labels_format = "%a. %-d %B"
-    resultset = Event.objects.query_retention(filter, team)
-
-    by_dates = {(int(row.first_date), int(row.date)): row.count for row in resultset}
+    resultset = Event.objects.query_retention(filter, team, start_entity=start_entity)
 
     result = {
         "data": [
             {
-                "values": [by_dates.get((first_day, day), 0) for day in range(total_days - first_day)],
+                "values": [
+                    resultset.get((first_day, day), {"count": 0, "people": []}) for day in range(total_days - first_day)
+                ],
                 "label": "Day {}".format(first_day),
                 "date": (date_from + timedelta(days=first_day)).strftime(labels_format),
             }
@@ -470,25 +480,23 @@ def add_person_properties_annotations(team_id: int, breakdown: str) -> Dict[str,
 
 
 def aggregate_by_interval(
-    filtered_events: QuerySet,
-    team_id: int,
-    entity: Entity,
-    filter: Filter,
-    interval: str,
-    params: dict,
-    breakdown: Optional[str] = None,
+    filtered_events: QuerySet, team_id: int, entity: Entity, filter: Filter, breakdown: Optional[str] = None,
 ) -> Dict[str, Any]:
+    interval = filter.interval if filter.interval else "day"
     interval_annotation = get_interval_annotation(interval)
     values = [interval]
     if breakdown:
-        breakdown_type = params.get("breakdown_type")
-        if breakdown_type == "cohort":
-            cohort_annotations = add_cohort_annotations(team_id, json.loads(params.get("breakdown", "[]")))
+        if filter.breakdown_type == "cohort":
+            cohort_annotations = add_cohort_annotations(
+                team_id, json.loads(filter.breakdown) if filter.breakdown else []
+            )
             values.extend(cohort_annotations.keys())
             filtered_events = filtered_events.annotate(**cohort_annotations)
             breakdown = "cohorts"
-        elif breakdown_type == "person":
-            person_annotations = add_person_properties_annotations(team_id, params.get("breakdown", ""))
+        elif filter.breakdown_type == "person":
+            person_annotations = add_person_properties_annotations(
+                team_id, filter.breakdown if filter.breakdown else ""
+            )
             filtered_events = filtered_events.annotate(**person_annotations)
             values.append(breakdown)
         else:
@@ -511,9 +519,24 @@ def aggregate_by_interval(
     return dates_filled
 
 
-def process_math(query: QuerySet, entity: Entity):
+def process_math(query: QuerySet, entity: Entity) -> QuerySet:
+    math_to_aggregate_function = {"sum": Sum, "avg": Avg, "min": Min, "max": Max}
     if entity.math == "dau":
+        # In daily active users mode count only up to 1 event per user per day
         query = query.annotate(count=Count("person_id", distinct=True))
+    elif entity.math in math_to_aggregate_function:
+        # Run relevant aggregate function on specified event property, casting it to a double
+        query = query.annotate(
+            count=math_to_aggregate_function[entity.math](
+                Cast(RawSQL('"posthog_event"."properties"->>%s', (entity.math_property,)), output_field=FloatField())
+            )
+        )
+        # Skip over events where the specified property is not set or not a number
+        # It may not be ideally clear to the user what events were skipped,
+        # but in the absence of typing, this is safe, cheap, and frictionless
+        query = query.extra(
+            where=['jsonb_typeof("posthog_event"."properties"->%s) = \'number\''], params=[entity.math_property]
+        )
     return query
 
 
@@ -577,10 +600,9 @@ def breakdown_label(entity: Entity, value: Union[str, int]) -> Dict[str, Optiona
     return ret_dict
 
 
-def serialize_entity(entity: Entity, filter: Filter, params: dict, team_id: int) -> List[Dict[str, Any]]:
-    interval = params.get("interval")
-    if interval is None:
-        interval = "day"
+def serialize_entity(entity: Entity, filter: Filter, team_id: int) -> List[Dict[str, Any]]:
+    if filter.interval is None:
+        filter.interval = "day"
 
     serialized: Dict[str, Any] = {
         "action": entity.to_dict(),
@@ -592,28 +614,26 @@ def serialize_entity(entity: Entity, filter: Filter, params: dict, team_id: int)
     }
     response = []
     events = process_entity_for_events(
-        entity=entity, team_id=team_id, order_by=None if params.get("shown_as") == "Stickiness" else "-timestamp",
+        entity=entity, team_id=team_id, order_by=None if filter.shown_as == "Stickiness" else "-timestamp",
     )
     events = events.filter(filter_events(team_id, filter, entity))
-    if params.get("shown_as", "Volume") == "Volume":
+    if not filter.shown_as or filter.shown_as == "Volume":
         items = aggregate_by_interval(
             filtered_events=events,
             team_id=team_id,
             entity=entity,
             filter=filter,
-            interval=interval,
-            params=params,
-            breakdown="properties__{}".format(params.get("breakdown")) if params.get("breakdown") else None,
+            breakdown="properties__{}".format(filter.breakdown) if filter.breakdown else None,
         )
         for value, item in items.items():
             new_dict = copy.deepcopy(serialized)
             if value != "Total":
                 new_dict.update(breakdown_label(entity, value))
-            new_dict.update(append_data(dates_filled=list(item.items()), interval=interval))
+            new_dict.update(append_data(dates_filled=list(item.items()), interval=filter.interval))
             if filter.display == TRENDS_CUMULATIVE:
                 new_dict["data"] = np.cumsum(new_dict["data"])
             response.append(new_dict)
-    elif params.get("shown_as") == TRENDS_STICKINESS:
+    elif filter.shown_as == TRENDS_STICKINESS:
         new_dict = copy.deepcopy(serialized)
         new_dict.update(stickiness(filtered_events=events, entity=entity, filter=filter, team_id=team_id))
         response.append(new_dict)
