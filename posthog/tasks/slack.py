@@ -3,11 +3,12 @@ import re
 import requests
 from celery import shared_task
 from django.conf import settings
+from typing import Tuple
 
 from posthog.models import Action, Event, Team
 
 
-def get_user_details(event: Event, site_url: str) -> (str, str):
+def get_user_details(event: Event, site_url: str) -> Tuple[str, str]:
     try:
         user_name = event.person.properties.get("email", event.distinct_id)
     except:
@@ -24,7 +25,7 @@ def get_user_details(event: Event, site_url: str) -> (str, str):
     return user_name, user_markdown
 
 
-def get_action_details(action: Action, event: Event, site_url: str) -> (str, str):
+def get_action_details(action: Action, event: Event, site_url: str) -> Tuple[str, str]:
     if get_webhook_type(event.team) == "slack":
         action_markdown = '"<{}/action/{}|{}>"'.format(site_url, action.id, action.name)
     else:
@@ -34,7 +35,7 @@ def get_action_details(action: Action, event: Event, site_url: str) -> (str, str
     return action.name, action_markdown
 
 
-def get_tokens(message_format: str) -> (str, str):
+def get_tokens(message_format: str) -> Tuple[str, str]:
     matched_tokens = re.findall(r"(?<=\[)(.*?)(?=\])", message_format)
     if matched_tokens:
         tokenised_message = re.sub(r"\[(.*?)\]", "{}", message_format)
@@ -44,7 +45,7 @@ def get_tokens(message_format: str) -> (str, str):
 
 def get_value_of_token(
     action: Action, event: Event, site_url: str, token_parts: list,
-) -> (str, str):
+) -> Tuple[str, str]:
     if token_parts[0] == "user":
         if token_parts[1] == "name":
             user_name, user_markdown = get_user_details(event, site_url)
@@ -65,7 +66,7 @@ def get_value_of_token(
             return event.event, event.event
 
 
-def get_formatted_message(action: Action, event: Event, site_url: str) -> (str, str):
+def get_formatted_message(action: Action, event: Event, site_url: str) -> Tuple[str, str]:
     message_format = action.slack_message_format
     if message_format is None:
         message_format = "[action.name] was triggered by [user.name]"
