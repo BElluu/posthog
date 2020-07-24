@@ -1,9 +1,9 @@
 import re
+from typing import Tuple
 
 import requests
 from celery import shared_task
 from django.conf import settings
-from typing import Tuple, List
 
 from posthog.models import Action, Event, Team
 
@@ -39,34 +39,38 @@ def get_tokens(message_format: str) -> Tuple[list, str]:
     matched_tokens = re.findall(r"(?<=\[)(.*?)(?=\])", message_format)
     if matched_tokens:
         tokenised_message = re.sub(r"\[(.*?)\]", "{}", message_format)
-        return matched_tokens, tokenised_message
-    return None
+    else:
+        tokenised_message = message_format
+    return matched_tokens, tokenised_message
 
 
 def get_value_of_token(
     action: Action, event: Event, site_url: str, token_parts: list,
 ) -> Tuple[str, str]:
+    text = ""
+    markdown = ""
     if token_parts[0] == "user":
         if token_parts[1] == "name":
-            user_name, user_markdown = get_user_details(event, site_url)
-            return user_name, user_markdown
+            text, markdown = get_user_details(event, site_url)
         else:
             user_property = event.properties.get("$" + token_parts[1])
             if user_property is None:
                 raise ValueError
-            return user_property, user_property
+            text = markdown = user_property
 
     elif token_parts[0] == "action":
         if token_parts[1] == "name":
-            action_name, action_markdown = get_action_details(action, event, site_url)
-            return action_name, action_markdown
+            text, markdown = get_action_details(action, event, site_url)
 
     elif token_parts[0] == "event":
         if token_parts[1] == "name":
-            return event.event, event.event
+            text = markdown = event.event
+    return text, markdown
 
 
-def get_formatted_message(action: Action, event: Event, site_url: str) -> Tuple[str, str]:
+def get_formatted_message(
+    action: Action, event: Event, site_url: str,
+) -> Tuple[str, str]:
     message_format = action.slack_message_format
     if message_format is None:
         message_format = "[action.name] was triggered by [user.name]"

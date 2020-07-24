@@ -83,11 +83,6 @@ class SlackMessage(BaseTest):
         self.assertEqual(matched_tokens, ["action.name", "user.name"])
         self.assertEqual(tokenised_message, "{} got did by {}")
 
-    def test_get_tokens_empty(self) -> None:
-        format2 = "This should trigger an error!"
-        with self.assertRaises(ValueError):
-            matched_tokens, tokenised_message = get_tokens(format2)
-
     def test_get_value_of_token_user_correct(self) -> None:
         self.team.slack_incoming_webhook = "https://hooks.slack.com/services/"
         event1 = Event.objects.create(
