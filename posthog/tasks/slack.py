@@ -49,6 +49,7 @@ def get_value_of_token(
 ) -> Tuple[str, str]:
     text = ""
     markdown = ""
+
     if token_parts[0] == "user":
         if token_parts[1] == "name":
             text, markdown = get_user_details(event, site_url)
@@ -57,14 +58,14 @@ def get_value_of_token(
             if user_property is None:
                 raise ValueError
             text = markdown = user_property
-
     elif token_parts[0] == "action":
         if token_parts[1] == "name":
             text, markdown = get_action_details(action, event, site_url)
-
     elif token_parts[0] == "event":
         if token_parts[1] == "name":
             text = markdown = event.event
+    else:
+        raise ValueError
     return text, markdown
 
 
