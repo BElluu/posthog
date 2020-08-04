@@ -1,5 +1,6 @@
 import datetime
 import json
+from distutils.util import strtobool
 from typing import Any, Dict, List, Optional, Union
 
 from dateutil.relativedelta import relativedelta
@@ -31,7 +32,7 @@ class Filter(PropertyMixin):
     shown_as: Optional[str] = None
     breakdown: Optional[Union[str, List[Union[str, int]]]] = None
     breakdown_type: Optional[str] = None
-    compare: Optional[bool] = None
+    _compare: Optional[Union[bool, str]] = None
     funnel_id: Optional[int] = None
 
     def __init__(self, data: Optional[Dict[str, Any]] = None, request: Optional[HttpRequest] = None,) -> None:
@@ -55,7 +56,7 @@ class Filter(PropertyMixin):
         self.shown_as = data.get("shown_as")
         self.breakdown = self._parse_breakdown(data)
         self.breakdown_type = data.get("breakdown_type")
-        self.compare = data.get("compare")
+        self._compare = data.get("compare", "false")
 
         if data.get("actions"):
             self.entities.extend(
@@ -77,19 +78,34 @@ class Filter(PropertyMixin):
             return breakdown
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        full_dict = {
             "date_from": self._date_from,
             "date_to": self._date_to,
             "properties": [prop.to_dict() for prop in self.properties],
             "interval": self.interval,
             "events": [entity.to_dict() for entity in self.events],
             "actions": [entity.to_dict() for entity in self.actions],
+            "display": self.display,
             "selector": self.selector,
             "shown_as": self.shown_as,
             "breakdown": self.breakdown,
             "breakdown_type": self.breakdown_type,
             "compare": self.compare,
         }
+        return {
+            key: value
+            for key, value in full_dict.items()
+            if (isinstance(value, list) and len(value) > 0) or (not isinstance(value, list) and value)
+        }
+
+    @property
+    def compare(self) -> bool:
+        if isinstance(self._compare, bool):
+            return self._compare
+        elif isinstance(self._compare, str):
+            return bool(strtobool(self._compare))
+        else:
+            return False
 
     @property
     def actions(self) -> List[Entity]:
