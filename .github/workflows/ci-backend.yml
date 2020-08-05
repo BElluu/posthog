@@ -4,7 +4,8 @@ on:
     - pull_request
 
 jobs:
-    backend-code-quality:
+    code-quality:
+        name: Code quality checks
         runs-on: ubuntu-latest
 
         services:
@@ -55,7 +56,8 @@ jobs:
               run: |
                   mypy posthog
 
-    backend-functionality:
+    functionality:
+        name: Functionality checks
         runs-on: ubuntu-latest
 
         services:
