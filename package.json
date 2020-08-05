@@ -18,7 +18,8 @@
         "build": "NODE_ENV=production webpack --config webpack.config.js && cp -a frontend/public/* frontend/dist/ && npm run copy-array",
         "prettier": "prettier --write \"./frontend/src/**/*.{js,css,scss}\"",
         "eslint": "eslint frontend/src",
-        "eslint:github-action": "yarn run eslint",
+        "eslint:ci": "yarn run eslint",
+        "prettier:ci": "prettier --check ./**.{js,ts,tsx,json,css,scss}",
         "typegen:watch": "kea-typegen watch --path frontend/src"
     },
     "license": "MIT",
